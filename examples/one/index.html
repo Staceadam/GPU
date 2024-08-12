@@ -1,0 +1,143 @@
+<html>
+	<body>
+		<canvas id="canvas" width="640" height="480"></canvas>
+	</body>
+	<script id="shader" type="wgsl">
+		struct VertexOutput {
+			@builtin(position) clip_position: vec4<f32>,
+		};
+
+		@vertex
+		fn vs_main(
+			@builtin(vertex_index) in_vertex_index: u32,
+		) -> VertexOutput {
+			var out: VertexOutput;
+			let x = f32(1 - i32(in_vertex_index)) * 0.5;
+			let y = f32(i32(in_vertex_index & 1u) * 2 - 1) * 0.5;
+			out.clip_position = vec4<f32>(x, y, 0.0, 1.0);
+			return out;
+		}
+
+		@fragment
+		fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+			return vec4<f32>(0.3, 0.2, 0.1, 1.0);
+		}
+	</script>
+
+	<script>
+		async function webgpu() {
+			// check to see if browser has webgpu
+			if (!navigator.gpu) {
+				console.error('WebGPU is not available.')
+
+				throw new Error('WebGPU support is not available')
+			}
+
+			// attempt to get and adapter
+			const adapter = await navigator.gpu.requestAdapter()
+			if (!adapter) {
+				console.error('Failed to request Adapter.')
+				return
+			}
+
+			// attempt to get a device
+			let device = await adapter.requestDevice()
+			if (!device) {
+				console.error('Failed to request Device.')
+				return
+			}
+
+			// create a canvas context
+			const context = canvas.getContext('webgpu')
+
+			// get our fragment shader
+			let code = document.getElementById('shader').innerText
+			const shaderDesc = { code: code }
+			// feed it into our device
+			let shaderModule = device.createShaderModule(shaderDesc)
+
+			// define our pipeline layout
+			const pipelineLayoutDesc = { bindGroupLayouts: [] }
+			const layout = device.createPipelineLayout(pipelineLayoutDesc)
+
+			const colorState = {
+				format: 'bgra8unorm'
+			}
+
+			const pipelineDesc = {
+				layout,
+				vertex: {
+					module: shaderModule,
+					entryPoint: 'vs_main',
+					buffers: []
+				},
+
+				fragment: {
+					module: shaderModule,
+					entryPoint: 'fs_main',
+					targets: [colorState]
+				},
+
+				primitive: {
+					topology: 'triangle-list',
+					frontFace: 'ccw',
+					cullMode: 'back'
+				}
+			}
+
+			let pipeline = device.createRenderPipeline(pipelineDesc)
+
+			const canvasConfig = {
+				device: device,
+				// pixel format for rendering outcomes
+				format: navigator.gpu.getPreferredCanvasFormat(),
+				// buffer usage, RENDER_ATTACHMENT means render it to the canvas
+				usage: GPUTextureUsage.RENDER_ATTACHMENT,
+				// toggle for adjusting the canvases transparency
+				alphaMode: 'opaque'
+			}
+
+			context.configure(canvasConfig)
+
+			// gets a buffer from the swap chain
+			let colorTexture = context.getCurrentTexture()
+			// creates a view from the current texture
+			let colorTextureView = colorTexture.createView()
+
+			// render pass, this can be thought of as a layer in photoshop
+			let colorAttachment = {
+				// sets the view
+				view: colorTextureView,
+				clearValue: { r: 1, g: 0, b: 0, a: 1 },
+				loadOp: 'clear',
+				storeOp: 'store'
+			}
+
+			const renderPassDesc = {
+				colorAttachments: [colorAttachment]
+			}
+
+			// initialize a command encoder to send data to the GPU
+			let commandEncoder = device.createCommandEncoder()
+			// this is the single render pass with our configuration
+			let passEncoder = commandEncoder.beginRenderPass(renderPassDesc)
+
+			// this sets the viewport for the GPU, it is using the global canvas width and height
+			passEncoder.setViewport(0, 0, canvas.width, canvas.height, 0, 1)
+
+			// uses the render pipeline we defined before
+			passEncoder.setPipeline(pipeline)
+
+			// draw is what triggers the rendering process, first argument is indices, second argument is the instance count
+			passEncoder.draw(3, 1)
+
+			// end the rendering pass
+			passEncoder.end()
+
+			// submits a finish event to the device queue
+			device.queue.submit([commandEncoder.finish()])
+		}
+
+		webgpu()
+	</script>
+</html>
